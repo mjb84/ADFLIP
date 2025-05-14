@@ -4,9 +4,6 @@ from data.all_atom_parse import dump_structure_data
 import glob
 import os
 from tqdm import tqdm
-from Bio.PDB.MMCIF2Dict import MMCIF2Dict
-import gzip
-
 import argparse
 
 def process_file(raw_data):

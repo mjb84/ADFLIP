@@ -1,18 +1,24 @@
 import torch
 import glob
 import os
-import traceback
 import numpy as np
 import pandas as pd
 import torch.utils
 import torch.utils.data
 import random
+import pickle
+
+
+from pathlib import Path
+from typing import Dict, List, Literal
 
 from data.all_atom_parse import residue_tokens
 from data import all_atom_parse as aap
 from data.all_atom_parse import StructureData
 from data.utils import TimeSortedCacheRBT
 
+
+Partition = Literal["train", "valid", "test"]
 
 def propagate_mask_vectorized(mask, index):
     # Ensure inputs are tensors
@@ -43,32 +49,27 @@ class AllAtomDataset(torch.utils.data.Dataset):
         cache_length: int = -1,
         test_time=0.0,
     ):
-        # if dataset_type == "train":
+
         self.max_num_residues = cfg.max_num_residues
         self.max_num_atoms = cfg.max_num_atoms
-        # else:
-        #     self.max_num_residues = 100000
-        #     self.max_num_atoms = 100000
-
+        self.dataset_type   = dataset_type
         self.cut_position_type = cfg.cut_position_type
         self.random_gen = np.random.default_rng(cfg.random_seed)
-        self.dataset_type = dataset_type
-        paths = {
-            "train": cfg.train_path,
-            "valid": cfg.valid_path,
-            "test": cfg.test_path,
-        }
+
+        paths = cfg.data_path
 
         self.structs = (
-            glob.glob(f"{paths[dataset_type]}/*.pdb")
-            + glob.glob(f"{paths[dataset_type]}/*.cif")
-            + glob.glob(f"{paths[dataset_type]}/*.npz")
+            glob.glob(f"{paths}/*.pdb")
+            + glob.glob(f"{paths}/*.cif")
+            + glob.glob(f"{paths}/*.npz")
+            + glob.glob(f"{paths}/*.cif.gz")
         )
         if len(self.structs) == 0:
             self.structs = (
-                glob.glob(f"{paths[dataset_type]}/**/*.pdb")
-                + glob.glob(f"{paths[dataset_type]}/**/*.cif")
-                + glob.glob(f"{paths[dataset_type]}/**/*.npz")
+                glob.glob(f"{paths}/**/*.pdb")
+                + glob.glob(f"{paths}/**/*.cif")
+                + glob.glob(f"{paths}/**/*.npz")
+                + glob.glob(f"{paths}/**/*.cif.gz")
             )
         self.test_time = test_time
         self.use_cache = use_cache
@@ -81,7 +82,7 @@ class AllAtomDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.structs)
 
-    def __getitem__(self, idx) -> aap.StructureData:
+    def __getitem__(self, idx, mask_chain_id = None) -> aap.StructureData:
         try:
             if self.use_cache:
                 data = self.cache_data.get(self.structs[idx])
@@ -131,35 +132,32 @@ class AllAtomDataset(torch.utils.data.Dataset):
                     n=self.max_num_atoms,
                 )
 
-        # I only know how to do this in torch...
-        # Mask proteins without 4 backbone atoms
-        num_residues = np.max(data.residue_index) + 1
-        num_backbones = torch.zeros(num_residues)
-        num_backbones.index_add_(
-            0,
-            torch.from_numpy(data.residue_index),
-            torch.from_numpy(data.is_backbone).float(),
-        )
-        full_backbone = (num_backbones == 4).numpy()
-        full_backbone_atoms = np.copy(data.not_pad_mask)
-        full_backbone_atoms = full_backbone[data.residue_index]
-        full_backbone_mask = (full_backbone_atoms) | (~data.is_protein)
-        data = aap.slice_structure_data(data, full_backbone_mask)
-
         if data.is_protein.sum() == 0:
             print("No protein found, path", self.structs[idx])
             return None
         data = self.interact_residue(data)
 
         if self.dataset_type == "train":
-            return self.corrupt(data)
+            return self.corrupt(data,mask_chain_id=mask_chain_id)
         else:
-            return self.corrupt(data, time=np.array([self.test_time]))
+            return self.corrupt(data, time=np.array([self.test_time]),mask_chain_id=mask_chain_id)
 
-    def corrupt(self, data: aap.StructureData, time=None) -> aap.StructureData:
+    def corrupt(self, data: aap.StructureData, time=None,mask_chain_id = None) -> aap.StructureData:
         # Corrupt the data in some way
-        raw_data = data.__dict__
         batch_dict = data.__dict__
+
+        mask_chain = np.zeros_like(batch_dict['chain_id'],dtype=bool) # True -> mask chain, False -> visible chain
+
+        if mask_chain_id is not None:
+
+            # make sure mask_chain_id is an array (works whether it’s a scalar or a list)
+            mask_chain_id = np.atleast_1d(mask_chain_id)
+
+            # True for positions where the chain_id is 0 or 1 (in your example)
+            to_mask = np.isin(batch_dict['chain_id'], mask_chain_id)
+
+            mask_chain[to_mask] = True # True -> mask chain, False -> visible chain
+            
         num_residue_tokens = batch_dict["residue_index"].max() + 1
         if time is not None:
             time_step = time
@@ -167,12 +165,19 @@ class AllAtomDataset(torch.utils.data.Dataset):
             time_step = np.random.uniform(0, 1, 1)
         u = np.random.uniform(0, 1, num_residue_tokens)
         target_mask = u < (1.0 - time_step)  # True -> mask
+        target_mask[~mask_chain[batch_dict['is_center']]] = False #unmask visble chain
 
         noisy_residue_token = np.copy(batch_dict["residue_token"])
         noisy_residue_token[
             target_mask[batch_dict["residue_index"]] & batch_dict["is_protein"]
-        ] = residue_tokens["<MASK>"]
+        ] = residue_tokens["<MASK>"] #only change protein
         batch_dict["noisy_residue_token"] = noisy_residue_token
+
+
+        #check visible chain and mask chain
+        print("mask_chain_id",mask_chain_id,'time_step',time_step)
+        print('mask ratio in visble chain', target_mask[~mask_chain[batch_dict['is_center']]].sum() / target_mask[~mask_chain[batch_dict['is_center']]].shape[0])
+        print('mask ratio in mask chain', target_mask[mask_chain[batch_dict['is_center']]].sum() / target_mask[mask_chain[batch_dict['is_center']]].shape[0])
 
         mask_sidechain = np.ones_like(batch_dict["residue_token"]).astype(bool)
         mask_sidechain[~batch_dict["is_backbone"] & batch_dict["is_protein"]] = (
@@ -182,7 +187,6 @@ class AllAtomDataset(torch.utils.data.Dataset):
                 ]
             ]
         )
-        # print(mask_sidechain.shape,raw_data['is_protein'].shape)
 
         for name, data in batch_dict.items():
             if name == "noisy_residue_token":
@@ -195,86 +199,44 @@ class AllAtomDataset(torch.utils.data.Dataset):
         return StructureData(**batch_dict)
 
     def interact_residue(self,data):
-            protein_pos = np.expand_dims(data.position[data.is_protein],axis=1)
-            non_protein_pos = np.expand_dims(data.position[~data.is_protein],axis=0)
-            ion_pos = np.expand_dims(data.position[data.is_ion],axis=0)
-            nucleotide_pos = np.expand_dims(data.position[data.is_nucleotide],axis=0)
-            molecule_pos = np.expand_dims(data.position[~data.is_protein&~data.is_ion&~data.is_nucleotide],axis=0)
+        protein_pos = np.expand_dims(data.position[data.is_protein],axis=1)
+        non_protein_pos = np.expand_dims(data.position[~data.is_protein],axis=0)
+        ion_pos = np.expand_dims(data.position[data.is_ion],axis=0)
+        nucleotide_pos = np.expand_dims(data.position[data.is_nucleotide],axis=0)
+        molecule_pos = np.expand_dims(data.position[~data.is_protein&~data.is_ion&~data.is_nucleotide],axis=0)
 
-            dist_non_protein = np.sqrt((np.sum((protein_pos-non_protein_pos)**2,axis=-1)))
-            interact_non_protein = np.any(dist_non_protein<5,axis=1)
-            dist_ion = np.sqrt((np.sum((protein_pos-ion_pos)**2,axis=-1)))
-            interact_ion = np.any(dist_ion<5,axis=1)
-            dist_nucleotide = np.sqrt((np.sum((protein_pos-nucleotide_pos)**2,axis=-1)))
-            interact_nucleotide = np.any(dist_nucleotide<5,axis=1)
-            dist_molecule = np.sqrt((np.sum((protein_pos-molecule_pos)**2,axis=-1)))
-            interact_molecule = np.any(dist_molecule<5,axis=1)
-
-
-            interact_non_protein_res = np.zeros(data.residue_index.shape[0],dtype=bool)
-            interact_non_protein_res[data.is_protein] = propagate_mask_vectorized(interact_non_protein,data.residue_index[data.is_protein])
-            interact_ion_res = np.zeros(data.residue_index.shape[0],dtype=bool)
-            interact_ion_res[data.is_protein] = propagate_mask_vectorized(interact_ion,data.residue_index[data.is_protein])
-            interact_nucleotide_res = np.zeros(data.residue_index.shape[0],dtype=bool)
-            interact_nucleotide_res[data.is_protein] = propagate_mask_vectorized(interact_nucleotide,data.residue_index[data.is_protein])
-            interact_molecule_res = np.zeros(data.residue_index.shape[0],dtype=bool)
-            interact_molecule_res[data.is_protein] = propagate_mask_vectorized(interact_molecule,data.residue_index[data.is_protein])
+        dist_non_protein = np.sqrt((np.sum((protein_pos-non_protein_pos)**2,axis=-1)))
+        interact_non_protein = np.any(dist_non_protein<5,axis=1)
+        dist_ion = np.sqrt((np.sum((protein_pos-ion_pos)**2,axis=-1)))
+        interact_ion = np.any(dist_ion<5,axis=1)
+        dist_nucleotide = np.sqrt((np.sum((protein_pos-nucleotide_pos)**2,axis=-1)))
+        interact_nucleotide = np.any(dist_nucleotide<5,axis=1)
+        dist_molecule = np.sqrt((np.sum((protein_pos-molecule_pos)**2,axis=-1)))
+        interact_molecule = np.any(dist_molecule<5,axis=1)
 
 
-            data.interact_non_protein_res = interact_non_protein_res
-            data.interact_ion_res = interact_ion_res
-            data.interact_nucleotide_res = interact_nucleotide_res
-            data.interact_molecule_res = interact_molecule_res
-
-            return data
-
-class PlinderDataset(AllAtomDataset):
-    def __init__(
-        self,
-        cfg,
-        dataset_type: str = "train",
-        use_cache: bool = True,
-        cache_length: int = -1,
-        test_time=0.0,
-    ):
-        super().__init__(cfg, dataset_type, use_cache, cache_length, test_time)
-        self.base_dir = os.path.split(cfg.train_path)[0]
-        self.df = pd.read_csv(os.path.join(self.base_dir, dataset_type + ".csv"))
-        paths = {
-            "train": cfg.train_path,
-            "valid": cfg.valid_path,
-            "test": cfg.test_path,
-        }
+        interact_non_protein_res = np.zeros(data.residue_index.shape[0],dtype=bool)
+        interact_non_protein_res[data.is_protein] = propagate_mask_vectorized(interact_non_protein,data.residue_index[data.is_protein])
+        interact_ion_res = np.zeros(data.residue_index.shape[0],dtype=bool)
+        interact_ion_res[data.is_protein] = propagate_mask_vectorized(interact_ion,data.residue_index[data.is_protein])
+        interact_nucleotide_res = np.zeros(data.residue_index.shape[0],dtype=bool)
+        interact_nucleotide_res[data.is_protein] = propagate_mask_vectorized(interact_nucleotide,data.residue_index[data.is_protein])
+        interact_molecule_res = np.zeros(data.residue_index.shape[0],dtype=bool)
+        interact_molecule_res[data.is_protein] = propagate_mask_vectorized(interact_molecule,data.residue_index[data.is_protein])
 
 
-        if self.use_cache:
-            self.structs = [
-                os.path.join(
-                    paths[dataset_type],
-                    x["system_id"][1:3],
-                    x["system_id"] + ".npz"
-                ) for _, x in self.df.iterrows()
-            ]
-        else:
-            self.structs = [
-                os.path.join(
-                    paths[dataset_type],
-                    x["system_id"][1:3],
-                    x["system_id"] + ".cif"
-                ) for _, x in self.df.iterrows()
-            ]
-        self.clusters = self.df.cluster.unique()
+        data.interact_non_protein_res = interact_non_protein_res
+        data.interact_ion_res = interact_ion_res
+        data.interact_nucleotide_res = interact_nucleotide_res
+        data.interact_molecule_res = interact_molecule_res
 
-    def __len__(self) -> int:
-        return len(self.structs)
+        return data
 
-    def __getitem__(self, idx) -> StructureData:
-        cluster = self.clusters[idx % len(self.clusters)]
-        sample = self.df[self.df.cluster == cluster].sample(
-            random_state=self.random_gen
-        )
-        index = int(sample.index[0])
-        return super().__getitem__(index)
+
+def _load_cluster_ids(path: Path | str) -> List[int]:
+    """Return a list of integer IDs, one per line, from *path*."""
+    with open(path, "r", encoding="utf-8") as f:
+        return [int(line.strip()) for line in f]
 
 class Cluster_AllAtomDataset(AllAtomDataset):
     def __init__(
@@ -286,25 +248,32 @@ class Cluster_AllAtomDataset(AllAtomDataset):
         test_time=0.0,
     ):
         super().__init__(cfg, dataset_type, use_cache, cache_length, test_time)
-        self.base_dir = os.path.split(cfg.train_path)[0]
+        self.cfg = cfg
+        assert dataset_type in ["train", "valid", "test"], f"Invalid dataset type: {dataset_type}"
+        with open(cfg.cluster_path, "rb") as f:
+            self.cluster_dict = pickle.load(f)
 
-        self.cluster_dict = torch.load(os.path.join(self.base_dir, 'train_cluster_dict.pt'))
-        self.all_pdb = []
-        for cluster in self.cluster_dict.values():
-            self.all_pdb.extend(cluster)
-
-        paths = {
-            "train": cfg.train_path,
-            "valid": cfg.valid_path,
-            "test": cfg.test_path,
+        id_lists: Dict[Partition, List[int]] = {
+            "train": _load_cluster_ids(cfg.train_cluster),
+            "valid": _load_cluster_ids(cfg.validation_cluster),
+            "test":  _load_cluster_ids(cfg.test_cluster),
+        }        
+        self.sel_keys = id_lists[dataset_type]
+        self.select_cluster = {
+            idx: value
+            for idx, (key, value) in enumerate(self.cluster_dict.items())
+            if key in self.sel_keys
         }
 
-        self.data_dir = os.path.join(self.base_dir,paths[dataset_type])
-
+        self.all_pdb = []
+        for _, v in self.select_cluster.items():
+            #v  17: ['5jog_0', '5joh_0', '5m5q_0', '4f7o_1', '4f7o_0'], 18: ['6jo8_2', '6ort_0', '6nk3_1', '6jo7_0', '6nk3_0']
+            v_ = list(set([x[:4] for x in v]))
+            self.all_pdb.extend(v_)
         if self.use_cache:
             self.structs = [
                 os.path.join(
-                    paths[dataset_type],
+                    cfg.data_path,
                     x[1:3],
                     x + ".npz"
                 ) for x in self.all_pdb
@@ -312,57 +281,70 @@ class Cluster_AllAtomDataset(AllAtomDataset):
         else:
             self.structs = [
                 os.path.join(
-                    paths[dataset_type],
-                    x["system_id"][1:3],
-                    x["system_id"] + ".cif"
-                ) for _, x in self.df.iterrows()
+                    cfg.data_path,
+                    x+ ".cif.gz"
+                ) for x in self.all_pdb
             ]
-
+        print(f"Dataset {dataset_type} contains {len(self.structs)} structures, {len(set(self.structs))} unique PDB IDs")   
     def __len__(self) -> int:
-        return len(self.cluster_dict.keys())
+        return len(self.select_cluster.keys())
 
     def __getitem__(self, idx) -> StructureData:
-        cluster = self.cluster_dict[idx]
-        sample = random.choice(cluster)
-        if self.use_cache:
-            sample_pdb_path = os.path.join(self.data_dir,sample[1:3],sample + ".npz")
+        cluster = self.select_cluster[self.sel_keys[idx]]
+        sample = random.choice(cluster) 
+        # check if sample in this cluster has same pdb id
+        sel_pdb = sample[:4]
+        cluster_pdb = [ x[:4] for x in cluster]
+        if cluster_pdb.count(sel_pdb) > 1: # 
+            sample_list = [x for x in cluster if x[:4] == sel_pdb]
+            mask_chain_id = [int(x[5]) for x in sample_list]
         else:
-            sample_pdb_path = os.path.join(''.join(self.structs[0].split('/')[:-2]),sample[1:3],sample + ".cif")
+            mask_chain_id = [int(sample[5])]
+        if self.use_cache:
+            sample_pdb_path = os.path.join(self.cfg.data_path,sample[1:3],sel_pdb + ".npz")
+        else:
+            sample_pdb_path = os.path.join(''.join(self.structs[0].split('/')[:-2]),sample[1:3],sel_pdb + ".cif.gz")
         index = self.structs.index(sample_pdb_path)
-        return super().__getitem__(index)
+        return super().__getitem__(index,mask_chain_id=mask_chain_id)
 
 
 if __name__ == "__main__":
-    from functools import partial
 
     # class Config:
-    #     train_path = "/ceph.groups/scheres_grp/kjamali/Kai_CATH42/test"
-    #     test_path = "null"
-    #     valid_path = "null"
+    #     data_path = "/ceph/scheres_grp/kyi/Documents/dataset/ligand_pdb/train_parsed"
+    #     max_num_atoms = 4096
     #     max_num_residues = 512
     #     random_seed = 42
+    #     cut_position_type = "ligand"
+    #     use_cathe = True
 
-    # dataset = AllAtomDataset(Config(), use_cache=True)
+    # dataset = AllAtomDataset(Config())
+
 
     class Config:
-        train_path = "/ceph/scheres_grp/kyi/Documents/dataset/ligand_pdb/train_parsed"
-        test_path = "null"
-        valid_path = "null"
+        data_path = "/ssd/dataset/pdb/parser_data/"
+        cluster_path = '/ceph.groups/scheres_grp/kyi/Documents/ADFLIP/data/cluster/cluster_to_pdb_chain.pkl'
+        train_cluster = '/ceph.groups/scheres_grp/kyi/Documents/ADFLIP/data/cluster/train_clusters.txt'
+        validation_cluster = '/ceph.groups/scheres_grp/kyi/Documents/ADFLIP/data/cluster/valid_clusters.txt'
+        test_cluster = '/ceph.groups/scheres_grp/kyi/Documents/ADFLIP/data/cluster/test_clusters.txt'
         max_num_atoms = 4096
         max_num_residues = 512
         random_seed = 42
         cut_position_type = "ligand"
         use_cathe = True
 
-    dataset = Cluster_AllAtomDataset(Config())
-
+    # dataset = Cluster_AllAtomDataset(Config(),dataset_type = 'train')
+    # print(len(dataset))
+    # dataset = Cluster_AllAtomDataset(Config(),dataset_type = 'valid')
+    # print(len(dataset))
+    dataset = Cluster_AllAtomDataset(Config(),dataset_type = 'train')
+    # print(len(dataset))
     for i in range(10):
         print(dataset[i])
+    # print(dataset[0])
 
-    # dataloader = torch.utils.data.DataLoader(
-    #     dataset, 2, collate_fn=partial(aap.batch_structure_data_list, to_torch=True)
-    # )
 
-    # for sample in dataloader:
-    #     print(sample)
-    #     break
+    # for i in range(10):
+    #     print(dataset[i])
+
+
