@@ -9,7 +9,7 @@ from data.all_atom_parse import (
 )
 from model.zoidberg.utils import FourierEmbedding, gather_residue_average_from_atoms
 from model.zoidberg.transition_block import TransitionBlock
-from model.proteinmpnn import gather_edges, PositionalEncodings, DihedralFeatures
+from model.MPNN import gather_edges, PositionalEncodings, DihedralFeatures
 from torch.nn import functional as F
 from torch_geometric.utils import to_dense_batch
 
