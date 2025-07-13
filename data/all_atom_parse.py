@@ -38,7 +38,7 @@ restype_3to1 = {v: k for k, v in restype_1to3.items()}
 
 # Tokenization goes from proteins to nucleic acids, to single atoms
 residue_tokens = OrderedDict()
-
+# For Kai
 residue_tokens["<PAD>"] = len(residue_tokens)
 residue_tokens["<MASK>"] = len(residue_tokens)
 
@@ -50,31 +50,32 @@ def add_flag_tokens(flag):
 
 
 add_flag_tokens("stdaa")
+
+residue_tokens["<START>"] = len(residue_tokens)
+residue_tokens["<END>"] = len(residue_tokens)
 residue_tokens["<UNK>"] = len(residue_tokens)
 
 # Extra tokens for ligands
+add_flag_tokens("nonstdaa")
 add_flag_tokens("nucleotide")
-# add_flag_tokens("nonstdaa")
-# add_flag_tokens("nucleic")
-# add_flag_tokens("ion")
-# residue_tokens["<GLYCAN>"] = len(residue_tokens)
+add_flag_tokens("nucleic")
+add_flag_tokens("ion")
+
+residue_tokens["<GLYCAN>"] = len(residue_tokens)
 
 
 token_to_index = {token: i for i, token in enumerate(residue_tokens)}
 index_to_token = {i: token for i, token in enumerate(residue_tokens)}
 num_residue_tokens = len(residue_tokens)
 
-# num_protein_tokens = residue_tokens["XAA"] + 1
-
+num_protein_tokens = residue_tokens["XAA"] + 1
 
 # Faster lookup for protein, nucleotide, or ion
-# protein_residues = set(
-#     list(prody.flagDefinition("stdaa")) + list(prody.flagDefinition("nonstdaa"))
-# )
-protein_residues = set(prody.flagDefinition("stdaa"))
+protein_residues = set(
+    list(prody.flagDefinition("stdaa")) + list(prody.flagDefinition("nonstdaa"))
+)
 nucleotide_residues = set(prody.flagDefinition("nucleotide"))
-# ion_residues = set(prody.flagDefinition("ion"))
-ion_residues = {'NA6', 'OC5', 'PT', 'DSC', 'MW1', 'CUZ', 'SEK', 'OC1', 'CON', 'BEF', 'OH', 'OCN', 'YB2', '119', 'SM', '2HP', 'E4N', 'ZO3', 'CU2', 'MN5', 'BA', 'SO3', '3NI', 'TRA', 'NI3', 'W', 'OS4', 'NRU', 'NAO', 'BR', 'ATH', 'EU3', 'IN', 'LA', '4TI', 'DMI', 'EU', 'NAW', 'DME', 'ZN3', 'BSY', 'ZR', 'T1A', 'PO3', 'THE', 'NET', 'BS3', 'MW3', 'OC8', 'YT3', 'O4M', 'ALF', 'AG', 'TBA', 'OAA', 'CUA', 'MO4', 'MO1', 'ZN2', 'RU', 'NA5', 'PR', 'HG', 'PD', 'CU3', 'OCL', 'TCN', '4MO', 'F', 'V', 'CU', 'BO4', '3CO', 'MOO', 'CU1', 'RHD', 'NO2', 'OS', 'TH', 'Y1', 'TL', 'FE', 'LU', 'OF3', '118', 'KO4', '1CU', 'MH2', 'MO', 'MO6', 'CD3', 'ZN', 'TEA', 'CD', 'AUC', 'NI2', 'CD5', 'FE2', 'OC4', 'PT4', 'CHT', 'IR3', 'MH3', 'MO3', 'K', 'RH3', 'MAC', 'MMC', 'PBM', 'IUM', '2FK', 'FPO', 'TMA', '2OF', 'MW2', 'MN6', 'OCO', 'TB', 'ZCM', 'LCP', 'CYN', 'MN3', 'YH', 'CO5', 'ZNO', 'OC6', 'AU3', 'AU', 'MG', '3OF', 'CR', 'OC2', 'MOS', 'BF4', 'SMO', 'YB', 'MO2', 'PTN', 'EMC', 'MOW', 'RB', 'NA2', '6MO', 'OXL', '543', 'CO', 'GD3', 'OF1', 'PB', 'VO4', 'OC7', 'SE4', 'HAI', '3MT', 'OCM', 'VN3', 'EDR', 'MN', 'GA', 'NI', 'OC3', 'ER3', 'DTI', 'MO5', '1AL', 'PER', 'HGC', 'SB', 'AM', 'AL', 'LCO', 'PI', '4PU', 'WO5', 'GEP', 'HO3', 'IR', 'LI', 'CD1', 'CF', 'IRI', 'OF2', 'CS', 'DY', 'CSB', 'NI1', 'CA', 'CAC', 'CE'} #af3 ion list
+ion_residues = set(prody.flagDefinition("ion")).union({'FE', 'FE2', 'NI'})
 
 
 # Element tokens
@@ -82,6 +83,7 @@ elements = list(IUPACData.atom_weights.keys())
 _ = elements.pop(elements.index("H"))  # Remove hydrogen
 elements.append("<ATOM_UNK>")
 elements.append("<ATOM_PAD>")
+elements = [e.upper() for e in elements]
 
 element_to_index = {element: i for i, element in enumerate(elements)}
 num_element_tokens = len(elements)
@@ -110,7 +112,7 @@ def get_token_index(token):
 
 
 def get_element_index(element):
-    return element_to_index.get(element, element_to_index["<ATOM_UNK>"])
+    return element_to_index.get(element.upper(), element_to_index["<ATOM_UNK>"])
 
 
 @dataclasses.dataclass
@@ -213,7 +215,7 @@ def init_struct_data_dict():
 
 
 def extend_struct_data_dict(
-    struct_data_dict, extension_data_dict, ligand_center=False, ion_center=False
+    struct_data_dict, extension_data_dict
 ) -> bool:
     # Check if ligand or ion
     if len(extension_data_dict["position"]) == 0:
@@ -222,7 +224,7 @@ def extend_struct_data_dict(
         extension_data_dict["is_protein"][-1] or
         extension_data_dict["is_nucleotide"][-1] or
         extension_data_dict["is_ion"][-1]
-    ): #for ligand
+    ):
         positions = np.array(extension_data_dict["position"])
         center_idx = np.argmin(
             np.linalg.norm(
@@ -231,37 +233,13 @@ def extend_struct_data_dict(
             ),
             axis=0
         )
-        if ligand_center:
-            extension_data_dict["is_center"] = [
-                i == center_idx for i in range(len(extension_data_dict["position"]))
-            ]
-            for key in struct_data_dict:
-                struct_data_dict[key].extend(extension_data_dict[key])
-            return True
-        else:
-            extension_data_dict["is_center"] = [
-                False for i in range(len(extension_data_dict["position"]))
-            ]
-            for key in struct_data_dict:
-                struct_data_dict[key].extend(extension_data_dict[key])
-            return False
-    elif extension_data_dict["is_ion"][-1]:
-        if ion_center:
-            for key in struct_data_dict:
-                struct_data_dict[key].extend(extension_data_dict[key])
-            return True
-        else:
-            extension_data_dict["is_center"] = [
-                False for i in range(len(extension_data_dict["position"]))
-            ]
-            for key in struct_data_dict:
-                struct_data_dict[key].extend(extension_data_dict[key])
-            return False            
-    else:
-        if any(extension_data_dict["is_center"]):
-            for key in struct_data_dict:
-                struct_data_dict[key].extend(extension_data_dict[key])
-            return True
+        extension_data_dict["is_center"] = [
+            i == center_idx for i in range(len(extension_data_dict["position"]))
+        ]
+    if any(extension_data_dict["is_center"]):
+        for key in struct_data_dict:
+            struct_data_dict[key].extend(extension_data_dict[key])
+        return True
     return False
 
 
@@ -280,76 +258,56 @@ def parse_structure(path_or_name: str):
     return structure
 
 
-def parse_mmcif_to_structure_data(path_or_name,parser_chain_id = None,ion_center = False,ligand_center=False) -> StructureData:
+def parse_mmcif_to_structure_data(path_or_name,parser_chain_id = None) -> StructureData:
     """
     Parse a mmCIF file and return a StructureData object.
     """
+    structure = parse_structure(path_or_name)
+    atoms = structure.select("not water and not hydrogen")
+    # atoms = atoms.select("occupancy > 0")
+
     # Store info on an atom basis
     # Each atom has a residue token, a residue index, and a chain ID
     # It also has a position in 3D space
     # Also an element and whether it is an ion atom or not
     # Additionally, a tag that specifies whether it is protein or not
 
-   # ──────────── load & pre-filter atoms ────────────
-    structure = parse_structure(path_or_name)
-    atoms = structure.select("not water and not hydrogen")
-
-    # ──────────── init containers ────────────
     struct_data = init_struct_data_dict()
     temp_residue_data = init_struct_data_dict()
 
-    prev_residue_index: str = ""
-    prev_chain_id: str = ""
+    prev_residue_index = ""
+    prev_chain_id = ""
     internal_residue_index = 0
     internal_chain_index = -1
     residue_atom_count = 0
 
-    # trackers for backbone-completeness in the *current* residue
-    backbone_atoms_present: set[str] = set()
-    backbone_candidate_indices: list[int] = []
-
-    # ──────────── iterate over atoms ────────────
     for atom in atoms:
         residue = atom.getResname()
         if residue in af3_crystallization_aids:
             continue
-
         chainid = atom.getChid()
-        if "-" in chainid:                # skip biological-assembly extras
-            continue
-        if len(chainid) > 1:              # mmCIF chain IDs can be >1 char
+        if len(chainid) > 1:
             chainid = chainid[0]
-        if parser_chain_id is not None and chainid not in parser_chain_id:
+        if parser_chain_id is not None and chainid not in  parser_chain_id:
+            # print(f"Skipping chain {atom.getChid()} in {path_or_name}")
             continue
-
-        resnum = f"{atom.getChid()}{atom.getResnum()}{atom.getIcode()}"
+        resnum = str(atom.getChid()) + str(atom.getResnum()) + str(atom.getIcode())
         is_new_residue_number = prev_residue_index != resnum
         is_new_chain_id = prev_chain_id != atom.getChid()
-
-        # ── handle residue / chain boundaries ──
         if is_new_residue_number or is_new_chain_id:
-            # validate backbone flags of the residue we are about to leave
-            if backbone_atoms_present and len(backbone_atoms_present) < 4:
-                for idx in backbone_candidate_indices:
-                    temp_residue_data["is_backbone"][idx] = False
-            backbone_atoms_present.clear()
-            backbone_candidate_indices.clear()
-
-            # push completed residue into the global container
-            if extend_struct_data_dict(struct_data, temp_residue_data,ligand_center=ligand_center,ion_center=ion_center):
+            prev_residue_index = resnum
+            # Check if there is a center for the last residue
+            # if there isn't, we skip that residue and don't increment
+            # the internal_residue_index
+            if extend_struct_data_dict(struct_data, temp_residue_data):
                 internal_residue_index += 1
             temp_residue_data = init_struct_data_dict()
             residue_atom_count = 0
-
             if is_new_chain_id:
                 prev_chain_id = atom.getChid()
                 internal_chain_index += 1
-            prev_residue_index = resnum
-
-        # ──────────── per-atom bookkeeping ────────────
         if residue in af3_glycans:
             residue = "<GLYCAN>"
-
         temp_residue_data["residue_token"].append(get_token_index(residue))
         temp_residue_data["residue_index"].append(internal_residue_index)
         temp_residue_data["residue_atom_index"].append(residue_atom_count)
@@ -361,49 +319,40 @@ def parse_mmcif_to_structure_data(path_or_name,parser_chain_id = None,ion_center
         temp_residue_data["is_ion"].append(residue in ion_residues)
         temp_residue_data["is_protein"].append(residue in protein_residues)
         temp_residue_data["is_nucleotide"].append(residue in nucleotide_residues)
+        temp_residue_data["is_backbone"].append(
+            (temp_residue_data["is_protein"][-1])
+            and (atom.getName() in ["N", "CA", "C", "O"])
+        )
         temp_residue_data["not_pad_mask"].append(True)
 
-        # tentative backbone assignment (validated later)
-        is_backbone_atom = (
-            temp_residue_data["is_protein"][-1]
-            and atom.getName() in {"N", "CA", "C", "O"}
-        )
-        temp_residue_data["is_backbone"].append(is_backbone_atom)
-
-        if is_backbone_atom:
-            backbone_atoms_present.add(atom.getName())
-            backbone_candidate_indices.append(residue_atom_count)
-
-        # center-atom definition
+        # Definition of a center atom is
+        # 1) CA atom in proteins
+        # 2) C1' atom in nucleotides
+        # 3) The first atom for everything else
         if temp_residue_data["is_protein"][-1]:
             temp_residue_data["is_center"].append(atom.getName() == "CA")
         elif temp_residue_data["is_nucleotide"][-1]:
             temp_residue_data["is_center"].append(atom.getName() == "C1'")
         elif temp_residue_data["is_ion"][-1]:
-            temp_residue_data["is_center"].append(
-                ion_center and residue_atom_count == 0
-            )
-        else:  # ligand
-            temp_residue_data["is_center"].append(
-                ligand_center and residue_atom_count == 0
-            )
+            temp_residue_data["is_center"].append(residue_atom_count == 0)
+        else:
+            # Ligand is_center should be based on the 
+            # average location of ligand atoms
+            temp_residue_data["is_center"].append(residue_atom_count == 0)
 
         residue_atom_count += 1
 
-    # ──────────── final residue flush ────────────
-    if backbone_atoms_present and len(backbone_atoms_present) < 4: 
-        for idx in backbone_candidate_indices:
-            temp_residue_data["is_backbone"][idx] = False
-    extend_struct_data_dict(struct_data, temp_residue_data, ion_center=ion_center, ligand_center=ligand_center)
+    # Merge last residue
+    extend_struct_data_dict(struct_data, temp_residue_data)
 
-    # ──────────── convert lists → numpy arrays ────────────
+    # Make numpy arrays
     for key in struct_data:
-        struct_data[key] = np.asarray(struct_data[key])
+        struct_data[key] = np.array(struct_data[key])
+    # Set first residue_index to 0
+    struct_data["residue_index"] -= np.min(struct_data["residue_index"])
 
-    # normalise residue indices (start at 0)
-    struct_data["residue_index"] -= struct_data["residue_index"].min()
-
-    return StructureData(**struct_data)
+    struct_data = StructureData(**struct_data)
+    return struct_data
 
 
 def mask_structure_data(struct_data: StructureData, mask_array: np.ndarray):
@@ -789,7 +738,7 @@ if __name__ == "__main__":
     print(f"Num tokens is: {np.max(struct_data.residue_token) + 1}")
 
     # Let's test masking
-    # mask_array = np.random.rand(np.max(struct_data.residue_token) + 1) > 0.2
-    # print(np.sum(mask_array))
-    # masked_struct_data = mask_structure_data(struct_data, mask_array)
-    # print(masked_struct_data)
+    mask_array = np.random.rand(np.max(struct_data.residue_token) + 1) > 0.2
+    print(np.sum(mask_array))
+    masked_struct_data = mask_structure_data(struct_data, mask_array)
+    print(masked_struct_data)

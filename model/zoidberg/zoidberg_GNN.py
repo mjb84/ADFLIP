@@ -191,7 +191,7 @@ class Zoidberg_GNN(nn.Module):
             batch_dict["position"], batch_dict["not_pad_mask"]
         )[0]
         # Calculate
-        for i in range(self.num_blocks//2):
+        for i in range(self.num_blocks):
             atom_x = self.layers[f"local_atom_attention_{i}"](
                 atom_x,
                 knn_graph_indices,
@@ -242,49 +242,6 @@ class Zoidberg_GNN(nn.Module):
                 )
             residue_x_context = self.V_C(residue_x_context)
             residue_x = residue_x + self.V_C_norm(self.dropout(residue_x_context))
-
-        for i in range(self.num_blocks//2,self.num_blocks):
-            atom_x = self.layers[f"local_atom_attention_{i}"](
-                atom_x,
-                knn_graph_indices,
-                batch_dict["position"],
-                frame_pos,
-                distance_matrix,
-                batch_dict["not_pad_mask"],
-            )
-            residue_x_from_atom, residue_mask = self.layers[
-                f"atom_to_node_embedder_{i}"
-            ](
-                atom_x,
-                batch_dict["is_center"],
-                unique_residue_index,
-                batch_dict["not_pad_mask"],
-            )
-
-            if residue_x.shape != residue_x_from_atom.shape:
-                raise ValueError(
-                    f"Residue shape {residue_x.shape} != {residue_x_from_atom.shape}"
-                )
-            residue_x, E = self.layers[f"gnn_block_{i}"](
-                residue_x,#h_V
-                residue_x_from_atom,#h_V_atom
-                E,
-                E_idx,
-                residue_x_pad_mask,
-                time=time_emb,
-            )
-            if i < self.num_blocks - 1 and self.update_atom:
-                atom_x = self.layers[f"node_to_atom_embedder_{i}"](
-                    atom_x,
-                    residue_x,
-                    unique_residue_index,
-                    batch_dict["not_pad_mask"],
-                )
-                atom_x = self.layers[f"transition_block_{i}"](atom_x)
-
-        
-        
-        
         
         
         #decoder layer
