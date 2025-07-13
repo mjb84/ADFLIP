@@ -13,7 +13,7 @@ There are two main ways to sample sequences from a given input file:
    ```python
 
    # Fixed-step sampling
-   samples, logits = ema_flow.ema_model.sample(
+   samples, logits = flow_model.sample(
        input_file,
        dt=0.2
    )
@@ -23,7 +23,7 @@ There are two main ways to sample sequences from a given input file:
 
    ```python
    # Adaptive sampling
-   samples, logits = ema_flow.ema_model.adaptive_sample(
+   samples, logits = flow_model.adaptive_sample(
        input_file,
        num_step=8,
        threshold=0.9
