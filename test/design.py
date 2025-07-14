@@ -157,7 +157,7 @@ def load_flow_model(ckpt_path: str, device: torch.device):
 
 def main():
     parser = argparse.ArgumentParser(description="Run ADFLIP inverse folding")
-    parser.add_argument("--pdb",          help="Path to input PDB/mmCIF file")
+    parser.add_argument("--pdb",          help="Path to input PDB/mmCIF file" , default="dataset/1g7g.pdb")
     parser.add_argument("--ckpt",       default="results/weights/ADFLIP_ICML_camera_ready.pt",
                         help="Path to model checkpoint")
     parser.add_argument("--device",     default="cuda:0", help="Torch device")
@@ -197,7 +197,9 @@ def main():
 
     print(f"Overall residue recovery rate:           {rr:.4f}")
     print(f"Interacting-residue recovery rate:        {rr_mol:.4f}")
-
+    
+    seq = ''.join(aap.restype_3to1[aap.index_to_token[i]] for i in samples.cpu().numpy())
+    print(f"Generated sequence: {seq}")
 
 if __name__ == "__main__":
     main()
