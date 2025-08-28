@@ -22,3 +22,4 @@ test/test_sidechain_packing.py
 chai_lab/
 chai_weight/
 chai_weight.tar.gz
+__PIPPack/*
