@@ -17,7 +17,10 @@ import dataclasses
 import io
 import gzip
 from typing import Optional, Sequence, Union
-import data.residue_constants as rc
+try:
+    import data.residue_constants as rc
+except:
+    import PIPPack.data.residue_constants as rc 
 from Bio.PDB import PDBParser,MMCIFParser
 import numpy as np
 import prody

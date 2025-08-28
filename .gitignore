@@ -18,9 +18,7 @@ cleaned_unique_tokens.txt
 out/
 .vscode/
 notebooks.ipynb
-PIPPack/model_weights/*
 test/test_sidechain_packing.py
 chai_lab/
 chai_weight/
 chai_weight.tar.gz
-PIPPack/model_weights/*
