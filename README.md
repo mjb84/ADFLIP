@@ -3,6 +3,17 @@
 ## Description
 Implementation for "All-atom inverse protein folding through discrete flow matching" [Link](https://openreview.net/forum?id=8tQdwSCJmA).
 
+## Environment Setup
+
+```bash
+conda create -n ADFLIP python=3.10 pip -y
+conda activate ADFLIP
+pip install -r requirements.txt
+pip install torch-cluster -f https://data.pyg.org/whl/torch-2.1.0+cu121.html
+pip install torch-scatter -f https://data.pyg.org/whl/torch-2.1.0+cu121.html
+pip install hydra-core
+```
+
 
 ## Usage
 
