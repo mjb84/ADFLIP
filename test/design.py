@@ -179,15 +179,20 @@ def main():
     true_tokens =  data["residue_token"][data["is_center"] & data["is_protein"]]
 
     # Run sampling
-    if args.method == "fixed":
-        samples, logits = ema_flow.ema_model.sample(args.pdb, dt=args.dt, argmax_final=True)
-    else:
-        samples, logits = ema_flow.ema_model.adaptive_sample(
-            args.pdb,
-            num_step=args.steps,
-            threshold=args.threshold,
-            argmax_final=False
+
+    if args.method == "adaptive":
+        out = ema_flow.adaptive_sample(
+            args.pdb, num_step=args.steps, threshold=args.threshold
         )
+    else:
+        out = ema_flow.sample(
+            args.pdb, dt=args.dt, argmax_final=True
+        )
+    # tolerate older/variant return signatures
+    if isinstance(out, tuple):
+        samples, logits = out
+    else:
+        samples, logits = out, None
     samples = samples.squeeze()
 
     # Compute recovery rates
