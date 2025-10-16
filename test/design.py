@@ -181,12 +181,12 @@ def main():
     # Run sampling
 
     if args.method == "adaptive":
-        out = ema_flow.adaptive_sample(
-            args.pdb, num_step=args.steps, threshold=args.threshold
+        out = model.adaptive_sample(
+            data, num_step=args.steps, threshold=args.threshold
         )
     else:
-        out = ema_flow.sample(
-            args.pdb, dt=args.dt, argmax_final=True
+        out = model.sample(
+            data, dt=args.dt, argmax_final=True
         )
     # tolerate older/variant return signatures
     if isinstance(out, tuple):
