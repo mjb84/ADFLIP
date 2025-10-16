@@ -178,7 +178,9 @@ def main():
     mask_center = data["is_center"] & data["is_protein"]
     true_tokens =  data["residue_token"][data["is_center"] & data["is_protein"]]
 
-    # Run sampling
+    # --- sampling ---
+    # ema_flow is an EMA wrapper; the actual model is at .ema_model
+    model = ema_flow.ema_model
 
     if args.method == "adaptive":
         out = model.adaptive_sample(
@@ -188,7 +190,8 @@ def main():
         out = model.sample(
             data, dt=args.dt, argmax_final=True
         )
-    # tolerate older/variant return signatures
+
+    # tolerate different return signatures
     if isinstance(out, tuple):
         samples, logits = out
     else:
